@@ -377,6 +377,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// Diubah dari "Minus" menjadi "Selisih"
 const HEADERS_PDF = ["No", "Part", "Deskripsi Part", "QTY", "Alloc", "Available", "Fisik", "Selisih"];
 const STORAGE_KEY = "stockOpnameData";
 
@@ -776,7 +777,7 @@ function getDataFromDOM() {
 function downloadExcel() {
     const data = getDataFromDOM();
     
-    // No urut baru, kolom Lokasi dan Nama dihapus sesuai permintaan
+    // Diubah "Minus" menjadi "Selisih"
     const rows = data.map((d, i) => ({
         "No": i + 1,
         "Part": d.part,
@@ -785,7 +786,7 @@ function downloadExcel() {
         "QTY Alloc": d.alloc,
         "Available": d.avail,
         "Fisik": d.fisik,
-        "Minus": d.minus
+        "Selisih": d.minus
     }));
 
     let tQty = 0, tAlloc = 0, tAvail = 0, tFisik = 0, tMinus = 0, hasFisik = false;
@@ -794,7 +795,6 @@ function downloadExcel() {
         if (d.fisik !== "") { tFisik += d.fisik; tMinus += d.minus; hasFisik = true; }
     });
     
-    // Baris Total
     rows.push({
         "No": "",
         "Part": "",
@@ -803,14 +803,13 @@ function downloadExcel() {
         "QTY Alloc": tAlloc,
         "Available": tAvail,
         "Fisik": hasFisik ? tFisik : "",
-        "Minus": hasFisik ? tMinus : ""
+        "Selisih": hasFisik ? tMinus : ""
     });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock Opname");
     
-    // Lebar kolom disesuaikan karena 2 kolom hilang
     ws["!cols"] = [
         {wch:5},  // No
         {wch:14}, // Part
@@ -819,7 +818,7 @@ function downloadExcel() {
         {wch:10}, // Alloc
         {wch:12}, // Available
         {wch:10}, // Fisik
-        {wch:10}  // Minus
+        {wch:10}  // Selisih
     ];
     
     XLSX.writeFile(wb, "stock_opname.xlsx");
