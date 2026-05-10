@@ -31,6 +31,7 @@
             --input-focus: #3b82f6;
             --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
             --shadow-lg: 0 4px 12px rgba(0,0,0,.1);
+            --empty-row-bg: #fffbeb;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -160,6 +161,9 @@
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
         td.center { text-align: center; }
 
+        tr.row-empty { background: var(--empty-row-bg) !important; }
+        tr.row-empty:hover { background: #fef3c7 !important; }
+
         .fisik-input {
             width: 70px; padding: 4px 8px; border: 1px solid var(--border);
             border-radius: 4px; font-size: 13px; text-align: right;
@@ -169,11 +173,14 @@
         .fisik-input:focus { outline: none; border-color: var(--input-focus); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
 
         .minus-neg {
-            color: var(--danger); font-weight: 700; background: var(--danger-bg);
+            color: #fff; font-weight: 700; background: var(--danger);
             border-radius: 4px; padding: 2px 6px; display: inline-block; min-width: 40px; text-align: center;
         }
         .minus-zero { color: var(--muted); }
-        .minus-pos { color: var(--success); font-weight: 600; }
+        .minus-pos {
+            color: #fff; font-weight: 600; background: var(--success);
+            border-radius: 4px; padding: 2px 6px; display: inline-block; min-width: 40px; text-align: center;
+        }
 
         tr.row-minus { background: var(--danger-bg) !important; }
         tr.row-minus:hover { background: #fee2e2 !important; }
@@ -371,13 +378,10 @@
 
 <script>
 const HEADERS_PDF = ["No", "Part", "Deskripsi Part", "QTY", "Alloc", "Available", "Fisik", "Selisih"];
+const STORAGE_KEY = "stockOpnameData";
 
-let allData = [];
-
-const COL_INDEX = {
-    "Tipe Lokasi": 1, "Nama": 2, "Part": 3,
-    "Deskripsi Part": 4, "QTY": 5, "QTY Alloc": 6, "Available": 7
-};
+let allData = []; 
+let currentSort = { col: null, dir: 'default' };
 
 document.getElementById('upload').addEventListener('change', handleFile);
 document.getElementById('filterLokasi').addEventListener('change', applyFilter);
@@ -390,7 +394,9 @@ document.getElementById('btnPDF').addEventListener('click', downloadPDF);
 
 document.querySelectorAll('.sort-select').forEach(sel => {
     sel.addEventListener('change', function() {
-        sortTableDOM(this.dataset.sortCol, this.value);
+        currentSort.col = this.dataset.sortCol;
+        currentSort.dir = this.value;
+        applyFilter();
     });
 });
 
@@ -405,17 +411,19 @@ function handleFile(e) {
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         let rawData = XLSX.utils.sheet_to_json(sheet);
 
-        allData = rawData.map(item => {
+        allData = rawData.map((item, index) => {
             if (item["No."] && !item["Nomor"]) item["Nomor"] = item["No."];
             if (item["Nama Part"] && !item["Nama"]) item["Nama"] = item["Nama Part"];
+            item.Fisik = ""; 
+            item._idx = index;
             return item;
         });
 
         document.querySelectorAll('.sort-select').forEach(s => s.value = 'default');
+        currentSort = { col: null, dir: 'default' };
 
         populateFilters();
-        renderTable(allData);
-        updateSummary();
+        applyFilter();
         enableButtons();
 
         document.getElementById('emptyState').style.display = 'none';
@@ -450,7 +458,7 @@ function populateFilters() {
     });
 }
 
-function applyFilter() {
+function getFilteredData() {
     const lokasi = document.getElementById("filterLokasi").value;
     const nama = document.getElementById("filterNama").value;
     const search = document.getElementById("searchInput").value.toLowerCase().trim();
@@ -467,47 +475,33 @@ function applyFilter() {
         );
     }
 
-    document.querySelectorAll('.sort-select').forEach(s => s.value = 'default');
-    renderTable(filtered);
-    updateSummary();
-    updateFooter();
-}
+    if (currentSort.col && currentSort.dir !== 'default') {
+        const col = currentSort.col;
+        const dir = currentSort.dir === 'asc' ? 1 : -1;
+        const isNumberCol = ['QTY', 'QTY Alloc', 'Available'].includes(col);
 
-function sortTableDOM(column, direction) {
-    if (direction === 'default') {
-        applyFilter();
-        return;
+        filtered = [...filtered].sort((a, b) => {
+            let valA = a[col] || "";
+            let valB = b[col] || "";
+
+            if (isNumberCol) {
+                valA = parseFloat(valA) || 0;
+                valB = parseFloat(valB) || 0;
+                return (valA - valB) * dir;
+            } else {
+                valA = String(valA).toLowerCase();
+                valB = String(valB).toLowerCase();
+                return valA.localeCompare(valB) * dir;
+            }
+        });
     }
 
-    document.querySelectorAll('.sort-select').forEach(sel => {
-        if (sel.dataset.sortCol !== column) sel.value = 'default';
-    });
+    return filtered;
+}
 
-    const tbody = document.getElementById("tableBody");
-    const rows = Array.from(tbody.querySelectorAll("tr"));
-    const colIdx = COL_INDEX[column];
-    const isNumberCol = ['QTY', 'QTY Alloc', 'Available'].includes(column);
-
-    rows.sort((a, b) => {
-        let valA = a.cells[colIdx] ? a.cells[colIdx].innerText.trim() : "";
-        let valB = b.cells[colIdx] ? b.cells[colIdx].innerText.trim() : "";
-
-        if (isNumberCol) {
-            valA = parseFloat(valA) || 0;
-            valB = parseFloat(valB) || 0;
-            return direction === 'asc' ? valA - valB : valB - valA;
-        } else {
-            return direction === 'asc' 
-                ? valA.localeCompare(valB, 'id', { sensitivity: 'base' }) 
-                : valB.localeCompare(valA, 'id', { sensitivity: 'base' });
-        }
-    });
-
-    rows.forEach(row => tbody.appendChild(row));
-    rows.forEach((row, index) => {
-        row.classList.toggle('row-alt-fix', index % 2 !== 0);
-    });
-
+function applyFilter() {
+    const filtered = getFilteredData();
+    renderTable(filtered);
     updateSummary();
     updateFooter();
 }
@@ -523,7 +517,8 @@ function renderTable(dataToRender) {
     dataToRender.forEach((item, index) => {
         const avail = getAvail(item);
         const tr = document.createElement("tr");
-        if (index % 2 !== 0) tr.classList.add('row-alt-fix');
+        
+        if(item.Fisik === "") tr.classList.add('row-empty');
 
         tr.appendChild(makeTD(item["Nomor"] || "", "center no-wrap"));
         tr.appendChild(makeTD(item["Tipe Lokasi"] || "", "no-wrap"));
@@ -540,16 +535,35 @@ function renderTable(dataToRender) {
         input.type = "number";
         input.className = "fisik-input";
         input.min = "0";
+        input.value = item.Fisik !== "" ? item.Fisik : ""; 
+        input.dataset.idx = item._idx; 
+        
         input.addEventListener("input", onFisikInput);
         input.addEventListener("keydown", onFisikKeydown);
         input.addEventListener("paste", onFisikPaste);
+        
         tdFisik.appendChild(input);
         tr.appendChild(tdFisik);
 
         const tdMinus = document.createElement("td");
         tdMinus.className = "num center";
+        
+        const fisik = item.Fisik !== "" ? parseFloat(item.Fisik) : null;
+        const minus = fisik !== null ? fisik - avail : null;
+        
+        if (minus === null) {
+            tdMinus.innerHTML = '';
+        } else if (minus < 0) {
+            tdMinus.innerHTML = `<span class="minus-neg">${minus}</span>`;
+            tr.classList.add("row-minus"); 
+            tr.classList.remove("row-empty");
+        } else if (minus === 0) {
+            tdMinus.innerHTML = `<span class="minus-zero">0</span>`;
+        } else {
+            tdMinus.innerHTML = `<span class="minus-pos">+${minus}</span>`;
+        }
+        
         tr.appendChild(tdMinus);
-
         tbody.appendChild(tr);
     });
 }
@@ -562,7 +576,14 @@ function makeTD(value, cls) {
 }
 
 function onFisikInput(e) {
-    calculateRowSelisih(e.target);
+    const inputEl = e.target;
+    const idx = parseInt(inputEl.dataset.idx);
+    const fisikVal = inputEl.value.trim();
+    
+    allData[idx].Fisik = fisikVal;
+    saveToLocalStorage();
+    
+    calculateRowSelisih(inputEl);
     updateSummary();
     updateFooter();
 }
@@ -578,14 +599,20 @@ function calculateRowSelisih(inputEl) {
     const avail = qty - alloc;
     const minus = fisik !== '' ? fisik - avail : null;
 
-    const tdMinus = cells[9]; 
-    if (minus === null) tdMinus.innerHTML = '';
-    else if (minus < 0) tdMinus.innerHTML = `<span class="minus-neg">${minus}</span>`;
-    else if (minus === 0) tdMinus.innerHTML = `<span class="minus-zero">0</span>`;
-    else tdMinus.innerHTML = `<span class="minus-pos">+${minus}</span>`;
+    tr.classList.remove("row-minus", "row-empty");
+    if(fisik === '') tr.classList.add('row-empty');
 
-    if (minus !== null && minus < 0) tr.classList.add("row-minus");
-    else tr.classList.remove("row-minus");
+    const tdMinus = cells[9]; 
+    if (minus === null) {
+        tdMinus.innerHTML = '';
+    } else if (minus < 0) {
+        tdMinus.innerHTML = `<span class="minus-neg">${minus}</span>`;
+        tr.classList.add("row-minus");
+    } else if (minus === 0) {
+        tdMinus.innerHTML = `<span class="minus-zero">0</span>`;
+    } else {
+        tdMinus.innerHTML = `<span class="minus-pos">+${minus}</span>`;
+    }
 }
 
 function onFisikKeydown(e) {
@@ -615,9 +642,12 @@ function onFisikPaste(e) {
             const targetIdx = startIdx + i;
             if (targetIdx < arr.length && line.trim() !== '') {
                 arr[targetIdx].value = parseFloat(line.trim()) || 0;
+                const idx = parseInt(arr[targetIdx].dataset.idx);
+                allData[idx].Fisik = arr[targetIdx].value;
                 calculateRowSelisih(arr[targetIdx]);
             }
         });
+        saveToLocalStorage();
         updateSummary();
         updateFooter();
     }
@@ -684,18 +714,15 @@ function updateFooter() {
 }
 
 function clearAllFisik() {
-    document.querySelectorAll(".fisik-input").forEach(input => input.value = "");
-    document.querySelectorAll("#tableBody tr").forEach(tr => {
-        tr.querySelector("td.num.center").innerHTML = '';
-        tr.classList.remove("row-minus");
-    });
-    updateSummary();
-    updateFooter();
+    allData.forEach(item => item.Fisik = "");
+    saveToLocalStorage();
+    applyFilter();
     showToast("Semua input Fisik telah direset");
 }
 
 function deleteAll() {
     allData = [];
+    localStorage.removeItem(STORAGE_KEY);
     document.getElementById("tableBody").innerHTML = "";
     document.getElementById("emptyState").style.display = '';
     document.getElementById("summary").style.display = 'none';
@@ -748,10 +775,17 @@ function getDataFromDOM() {
 
 function downloadExcel() {
     const data = getDataFromDOM();
-    const rows = data.map(d => ({
-        "Nomor": d.nomor, "Tipe Lokasi": d.tipeLokasi, "Nama": d.nama,
-        "Part": d.part, "Deskripsi Part": d.deskripsi, "QTY": d.qty,
-        "QTY Alloc": d.alloc, "Available QTY": d.avail, "Fisik": d.fisik, "Minus": d.minus
+    
+    // No urut baru, kolom Lokasi dan Nama dihapus sesuai permintaan
+    const rows = data.map((d, i) => ({
+        "No": i + 1,
+        "Part": d.part,
+        "Deskripsi Part": d.deskripsi,
+        "QTY": d.qty,
+        "QTY Alloc": d.alloc,
+        "Available": d.avail,
+        "Fisik": d.fisik,
+        "Minus": d.minus
     }));
 
     let tQty = 0, tAlloc = 0, tAvail = 0, tFisik = 0, tMinus = 0, hasFisik = false;
@@ -759,12 +793,35 @@ function downloadExcel() {
         tQty += d.qty; tAlloc += d.alloc; tAvail += d.avail;
         if (d.fisik !== "") { tFisik += d.fisik; tMinus += d.minus; hasFisik = true; }
     });
-    rows.push({"Nomor":"","Tipe Lokasi":"","Nama":"","Part":"","Deskripsi Part":"TOTAL","QTY":tQty,"QTY Alloc":tAlloc,"Available QTY":tAvail,"Fisik":hasFisik?tFisik:"","Minus":hasFisik?tMinus:""});
+    
+    // Baris Total
+    rows.push({
+        "No": "",
+        "Part": "",
+        "Deskripsi Part": "TOTAL",
+        "QTY": tQty,
+        "QTY Alloc": tAlloc,
+        "Available": tAvail,
+        "Fisik": hasFisik ? tFisik : "",
+        "Minus": hasFisik ? tMinus : ""
+    });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Stock Opname");
-    ws["!cols"] = [{wch:6},{wch:16},{wch:18},{wch:14},{wch:40},{wch:8},{wch:10},{wch:12},{wch:10},{wch:10}];
+    
+    // Lebar kolom disesuaikan karena 2 kolom hilang
+    ws["!cols"] = [
+        {wch:5},  // No
+        {wch:14}, // Part
+        {wch:40}, // Deskripsi
+        {wch:8},  // QTY
+        {wch:10}, // Alloc
+        {wch:12}, // Available
+        {wch:10}, // Fisik
+        {wch:10}  // Minus
+    ];
+    
     XLSX.writeFile(wb, "stock_opname.xlsx");
     showToast("Excel berhasil diunduh");
 }
@@ -772,7 +829,6 @@ function downloadExcel() {
 function downloadPDF() {
     const { jsPDF } = window.jspdf;
     
-    // 1. Siapkan Data
     const now = new Date();
     const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     const tanggalCetak = "Dicetak: " + now.toLocaleDateString('id-ID', options) + " " + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -789,7 +845,6 @@ function downloadPDF() {
     });
     rows.push(["","","TOTAL", tQty, tAlloc, tAvail, hasFisik ? tFisik : "", hasFisik ? tMinus : ""]);
 
-    // 2. Hitung Total Halaman Terlebih Dahulu (Dry Run)
     const docTemp = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
     docTemp.autoTable({
         head: [HEADERS_PDF], body: rows, startY: 23, margin: { left: 14, right: 14 }, tableWidth: 'exact',
@@ -799,7 +854,6 @@ function downloadPDF() {
     });
     const totalPages = docTemp.internal.getNumberOfPages();
 
-    // 3. Render PDF Asli dengan Nomor Halaman yang Sudah Diketahui
     const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
 
     doc.setFontSize(14); 
@@ -844,7 +898,6 @@ function downloadPDF() {
             const pageWidth = doc.internal.pageSize.getWidth();
             const currentPage = doc.internal.getCurrentPageInfo().pageNumber;
             
-            // Format: "1 dari 7", "2 dari 7", dst...
             doc.setFontSize(8);
             doc.setTextColor(150);
             doc.text(
@@ -858,6 +911,23 @@ function downloadPDF() {
     
     doc.save("stock_opname.pdf"); 
     showToast("PDF berhasil diunduh");
+}
+
+function saveToLocalStorage() {
+    const saveData = allData.map(item => ({ _idx: item._idx, Fisik: item.Fisik }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
+}
+
+function loadFromLocalStorage() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(saved) {
+        try {
+            return JSON.parse(saved);
+        } catch(e) {
+            return null;
+        }
+    }
+    return null;
 }
 
 function showToast(msg) {
